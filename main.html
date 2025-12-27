@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pip-Boy Network Analyzer</title>
+  <link href="https://fonts.googleapis.com/css?family=Share+Tech+Mono" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#141d10; --fg:#7cff60; --panel:#1e3110; --panel2:#203018;
+      --border:#406f2b; --border2:#4da33a; --glow:#193b13; --fg2:#8aff78;
+      --hover:#295220; --hoverBorder:#9fff8e;
+    }
+    body.light{
+      --bg:#eaffd2; --fg:#245314; --panel:#f3fff0; --panel2:#f3fff0;
+      --border:#b4f592; --border2:#7fcd6e; --glow:#bfe7b4; --fg2:#245314;
+      --hover:#d9ffd0; --hoverBorder:#3f7f35;
+    }
+    body{background:var(--bg); color:var(--fg); font-family:'Share Tech Mono', monospace; margin:0;}
+    #container{
+      max-width:540px; margin:38px auto; padding:26px 28px;
+      border:3px solid var(--border); border-radius:22px;
+      box-shadow:0 0 40px var(--glow), 0 0 3px var(--fg) inset;
+    }
+    h1{text-align:center; letter-spacing:2px; text-shadow:0 0 12px var(--fg); margin:10px 0 14px;}
+    .row{display:flex; gap:8px; flex-wrap:wrap; justify-content:center;}
+    button, input[type=text]{
+      background:var(--panel); border:1.5px solid var(--border);
+      color:var(--fg); font:inherit; border-radius:5px;
+      padding:7px 12px; margin:3px;
+    }
+    button:hover{background:var(--hover); border-color:var(--hoverBorder); cursor:pointer;}
+    #host{width:180px;}
+    #output{
+      margin-top:18px; background:var(--panel2);
+      border:1px solid var(--border2); border-radius:8px;
+      min-height:92px; padding:9px 13px; white-space:pre-wrap;
+      font-size:1.06em;
+    }
+    #logoWrap{display:flex;justify-content:center;gap:30px;align-items:flex-start;}
+    #logo{font-size:14px;color:var(--fg2);text-align:center;margin-bottom:6px;}
+    #vaultboy{font-size:13px;line-height:1;color:var(--fg); margin:0;}
+    hr{border:none;border-top:1px solid var(--border); opacity:0.6; margin:14px 0 8px;}
+    small{opacity:0.9;}
+    small a{color:var(--fg);}
+    .spinner{display:inline-block;width:16px}
+    details{margin-top:10px;}
+    summary{cursor:pointer;}
+    @media (max-width: 600px){
+      #container{max-width:97vw; padding:8vw 4vw; margin:18px auto;}
+      #vaultboy{font-size:11px;}
+      #host{width:min(240px, 86vw);}
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <div id="logoWrap">
+      <pre id="vaultboy">
+   .--.
+  (    )
+ (______)
+ ( 0  0 )
+  \_Y_/
+  /   \
+ /|   |\
+</pre>
+      <div id="logo">
+ ______________<br>| [] []  [] [] |<br>|_  Pip-Boy  _|<br>   \/\/\/\/\/\/
+      </div>
+    </div>
+
+    <h1>🖧 Network Analyzer</h1>
+
+    <div class="row">
+      <button onclick="showIP()">Get Public IP</button>
+      <button onclick="pingHost()">Ping (Browser)</button>
+      <button onclick="showConn()">Connection Info</button>
+    </div>
+
+    <div class="row">
+      <button onclick="whoisRdap()">WHOIS / RDAP</button>
+      <button onclick="arinLookup()">ARIN Lookup</button>
+      <button onclick="traceRoute()">Traceroute</button>
+    </div>
+
+    <div class="row">
+      <input type="text" id="host" placeholder="hostname or IP" />
+      <button onclick="toggleTheme()">Toggle Theme</button>
+      <button onclick="copyOutput()">Copy Output</button>
+    </div>
+
+    <div id="output"></div>
+
+    <details>
+      <summary>About</summary>
+      <b>Notes</b>
+      <ul>
+        <li>Browser “Ping” is approximate (CORS/firewalls can block timing).</li>
+        <li>WHOIS here uses RDAP over HTTPS (not port 43 WHOIS).</li>
+        <li>Traceroute runs from a remote probe (Globalping), not your device.</li>
+        <li>Use only on hosts you’re allowed to test.</li>
+      </ul>
+    </details>
+
+    <hr>
+    <small>Retro terminal • <a href="#" onclick="return false;">Source</a></small>
+  </div>
+
+  <script>
+    let spinInt = null;
+
+    const outEl = () => document.getElementById('output');
+
+    function localTime() {
+      return "== " + new Date().toLocaleTimeString() + " ==";
+    }
+
+    function setOutput(text) {
+      outEl().textContent = localTime() + "\n" + text;
+    }
+
+    function spinner(msg) {
+      const spins = ['|','/','-','\\'];
+      let i = 0;
+      clearInterval(spinInt);
+      spinInt = setInterval(() => {
+        outEl().innerHTML = `${msg} <span class="spinner">${spins[i++ % 4]}</span>`;
+      }, 110);
+    }
+
+    function stopSpinner(text) {
+      clearInterval(spinInt);
+      spinInt = null;
+      setOutput(text);
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('light');
+    }
+
+    async function copyOutput() {
+      const txt = outEl().innerText;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(txt);
+          alert("Output copied!");
+        } else {
+          prompt("Copy this:", txt);
+        }
+      } catch {
+        prompt("Copy this:", txt);
+      }
+    }
+
+    function cleanHostInput() {
+      const raw = (document.getElementById('host').value || "").trim();
+      if (!raw) return "";
+      return raw.replace(/^https?:\/\//,'').replace(/\/.*$/,'').trim();
+    }
+
+    function isIPv4(s) {
+      return /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(s);
+    }
+    function isLikelyIPv6(s) {
+      return /^[0-9a-fA-F:]+$/.test(s) && s.includes(":");
+    }
+    function isPrivateIPv4(ip) {
+      if (!isIPv4(ip)) return false;
+      const [a,b] = ip.split('.').map(n => parseInt(n,10));
+      if (a === 10) return true;
+      if (a === 127) return true;
+      if (a === 0) return true;
+      if (a === 169 && b === 254) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      return false;
+    }
+    function isPrivateIPv6(s) {
+      const x = s.toLowerCase();
+      return x === "::1" || x.startsWith("fe80:") || x.startsWith("fc") || x.startsWith("fd");
+    }
+    function isPublicTarget(host) {
+      if (isIPv4(host)) return !isPrivateIPv4(host);
+      if (isLikelyIPv6(host)) return !isPrivateIPv6(host);
+      return true; // domains: allow
+    }
+
+    async function showIP() {
+      spinner("Fetching public IP");
+      try {
+        const r = await fetch('https://api.ipify.org?format=json', { cache: 'no-store' });
+        const j = await r.json();
+        stopSpinner("Your public IP:\n" + j.ip);
+      } catch (e) {
+        stopSpinner("Error: " + e);
+      }
+    }
+
+    function showConn() {
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      const info = [
+        "Navigator Info:",
+        "User-Agent: " + navigator.userAgent,
+        "Language: " + navigator.language,
+        "Online: " + navigator.onLine,
+        "Platform: " + (navigator.platform || "n/a"),
+        "Screen: " + screen.width + "x" + screen.height,
+        "",
+        "Network (approx):",
+        c ? (
+          "Type: " + (c.type || "n/a") +
+          "\nEffective: " + (c.effectiveType || "n/a") +
+          "\nDownlink: " + (c.downlink != null ? (c.downlink + " Mbps") : "n/a") +
+          "\nRTT: " + (c.rtt != null ? (c.rtt + " ms") : "n/a")
+        ) : "Connection API not supported."
+      ];
+      stopSpinner(info.join('\n'));
+    }
+
+    async function resolveARecord(host) {
+      // returns first A record IP or null
+      const h = host.replace(/^https?:\/\//,'').replace(/\/.*$/,'');
+      try {
+        const res = await fetch('https://dns.google/resolve?name=' + encodeURIComponent(h) + '&type=A', { cache:'no-store' });
+        const j = await res.json();
+        const ans = j && j.Answer && j.Answer.find(a => a.type === 1);
+        return ans ? ans.data : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function barForMs(t) {
+      const blocks = Math.min(15, Math.max(1, Math.ceil(t / 20)));
+      return "[" + "■".repeat(blocks) + " ".repeat(15 - blocks) + "] " + t + " ms";
+    }
+
+    async function pingHost() {
+      const host = cleanHostInput() || "google.com";
+      const url = "https://" + host + "/";
+      const N = 4;
+
+      if (!isPublicTarget(host)) {
+        stopSpinner("Refusing: private/local targets are blocked in this demo.");
+        return;
+      }
+
+      let times = [];
+      let failed = 0;
+
+      spinner(`Pinging ${host} (${N} tries)`);
+      for (let i = 1; i <= N; i++) {
+        const start = performance.now();
+        try {
+          await fetch(url, { mode:'no-cors', cache:'no-store' });
+          times.push(Math.round(performance.now() - start));
+        } catch {
+          failed++;
+          times.push(null);
+        }
+      }
+
+      clearInterval(spinInt); spinInt = null;
+
+      const ok = times.filter(x => x !== null);
+      let txt = `Ping (browser) to ${host} (${N}):\n`;
+
+      if (ok.length) {
+        txt += ok.map(t => barForMs(t)).join('\n');
+        const avg = Math.round(ok.reduce((a,b)=>a+b,0) / ok.length);
+        txt += `\nAvg: ${avg} ms.`;
+      }
+      if (failed) txt += `\n${failed} failed.`;
+      if (!ok.length) {
+        txt += "\nAll failed. Common causes: CORS restrictions, HTTPS-only requirements, DNS issues, or a firewall.";
+      }
+      setOutput(txt);
+    }
+
+    function pickRegistrantName(entities) {
+      if (!Array.isArray(entities)) return null;
+      // Prefer role "registrant"
+      const reg = entities.find(e => Array.isArray(e.roles) && e.roles.includes("registrant")) || entities[0];
+      if (!reg || !Array.isArray(reg.vcardArray) || !Array.isArray(reg.vcardArray[1])) return null;
+      const v = reg.vcardArray[1];
+      const fn = v.find(x => x && x[0] === "fn");
+      return fn ? fn[3] : null;
+    }
+
+    async function fetchArinRdap(ipOrCidr) {
+      // ARIN RDAP lookup; may redirect/referral depending on IP
+      const url = "https://rdap.arin.net/registry/ip/" + encodeURIComponent(ipOrCidr);
+      const r = await fetch(url, { cache:'no-store' });
+      if (!r.ok) throw new Error(`ARIN RDAP HTTP ${r.status}`);
+      return await r.json();
+    }
+
+    function formatRdapNet(j) {
+      const lines = [];
+      lines.push("RDAP (IP Network):");
+      if (j.handle) lines.push("Handle: " + j.handle);
+      if (j.name) lines.push("Name: " + j.name);
+      if (j.type) lines.push("Type: " + j.type);
+      if (j.ipVersion) lines.push("IP Version: " + j.ipVersion);
+      if (j.startAddress && j.endAddress) lines.push("Range: " + j.startAddress + " - " + j.endAddress);
+      if (j.country) lines.push("Country: " + j.country);
+      const org = pickRegistrantName(j.entities);
+      if (org) lines.push("Registrant: " + org);
+      if (j.port43) lines.push("WHOIS server: " + j.port43);
+      if (Array.isArray(j.links)) {
+        const self = j.links.find(x => x && x.rel === "self" && x.href);
+        if (self && self.href) lines.push("RDAP URL: " + self.href);
+      }
+      return lines.join("\n");
+    }
+
+    async function whoisRdap() {
+      const target = cleanHostInput();
+      if (!target) { stopSpinner("Enter a hostname or IP first."); return; }
+      if (!isPublicTarget(target)) { stopSpinner("Refusing: private/local targets are blocked in this demo."); return; }
+
+      spinner("WHOIS/RDAP: preparing target...");
+      let ip = target;
+
+      if (!isIPv4(target) && !isLikelyIPv6(target)) {
+        const a = await resolveARecord(target);
+        if (!a) { stopSpinner("Could not resolve A record for: " + target); return; }
+        ip = a;
+      }
+
+      spinner("WHOIS/RDAP: querying RDAP (ARIN bootstrap)...");
+      try {
+        const j = await fetchArinRdap(ip);
+        const head = (ip !== target) ? (`Target: ${target}\nResolved IP: ${ip}\n\n`) : (`Target IP: ${ip}\n\n`);
+        stopSpinner(head + formatRdapNet(j) + "\n\n(WHOIS in browsers is replaced here by RDAP over HTTPS.)");
+      } catch (e) {
+        stopSpinner("RDAP error: " + e);
+      }
+    }
+
+    async function arinLookup() {
+      const target = cleanHostInput();
+      if (!target) { stopSpinner("Enter an IP (or a hostname) first."); return; }
+      if (!isPublicTarget(target)) { stopSpinner("Refusing: private/local targets are blocked in this demo."); return; }
+
+      spinner("ARIN lookup: preparing target...");
+      let ip = target;
+
+      if (!isIPv4(target) && !isLikelyIPv6(target)) {
+        const a = await resolveARecord(target);
+        if (!a) { stopSpinner("Could not resolve A record for: " + target); return; }
+        ip = a;
+      }
+
+      spinner("ARIN lookup: querying rdap.arin.net...");
+      try {
+        const j = await fetchArinRdap(ip);
+        const head = (ip !== target) ? (`Hostname: ${target}\nIP: ${ip}\n\n`) : (`IP: ${ip}\n\n`);
+        stopSpinner(head + formatRdapNet(j));
+      } catch (e) {
+        stopSpinner("ARIN RDAP error: " + e);
+      }
+    }
+
+    async function traceRoute() {
+      const target = cleanHostInput();
+      if (!target) { stopSpinner("Enter a hostname or IP first."); return; }
+      if (!isPublicTarget(target)) { stopSpinner("Refusing: private/local targets are blocked in this demo."); return; }
+
+      spinner("Traceroute: creating measurement (Globalping)...");
+      try {
+        const create = await fetch("https://api.globalping.io/v1/measurements", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target,
+            type: "traceroute",
+            // one US probe by default; change magic to "US+CA" or add multiple locations if you want
+            locations: [{ magic: "US" }]
+          })
+        });
+
+        const cj = await create.json().catch(() => ({}));
+        const id = cj.id || cj.measurementId || cj.uuid;
+        if (!id) throw new Error("Could not read measurement id from response.");
+
+        // Poll until done
+        let last = null;
+        for (let i = 1; i <= 25; i++) {
+          spinner(`Traceroute: running… (poll ${i}/25)`);
+          const r = await fetch("https://api.globalping.io/v1/measurements/" + encodeURIComponent(id), { cache:"no-store" });
+          last = await r.json();
+          const st = (last && (last.status || last.state) || "").toLowerCase();
+          if (st && st !== "in_progress" && st !== "in-progress") break;
+          await new Promise(res => setTimeout(res, 1000));
+        }
+
+        clearInterval(spinInt); spinInt = null;
+
+        if (!last) throw new Error("No traceroute result received.");
+
+        const results = Array.isArray(last.results) ? last.results : (last.result ? [last.result] : []);
+        if (!results.length) {
+          setOutput("Traceroute finished, but no results were returned.\nRaw:\n" + JSON.stringify(last, null, 2));
+          return;
+        }
+
+        // Display first probe result (keeps output readable)
+        const one = results[0];
+        const probe = one.probe || {};
+        const rr = one.result || {};
+
+        const lines = [];
+        lines.push("Traceroute (remote probe): " + target);
+        if (probe.city || probe.country) lines.push("Probe: " + [probe.city, probe.country].filter(Boolean).join(", "));
+        if (probe.asn) lines.push("Probe ASN: " + probe.asn);
+        lines.push("");
+        if (rr.rawOutput) {
+          lines.push(rr.rawOutput);
+        } else if (rr.hops) {
+          lines.push("(No rawOutput; showing hops)");
+          rr.hops.forEach((h) => {
+            const hop = h.hop || h.ttl || "?";
+            const ips = (h.ips || []).join(", ");
+            const rtts = (h.rtts || h.times || []).map(x => (typeof x === "number" ? (x + " ms") : x)).join(" ");
+            lines.push(String(hop).padStart(2," ") + "  " + (ips || "*") + "  " + rtts);
+          });
+        } else {
+          lines.push("Raw:\n" + JSON.stringify(last, null, 2));
+        }
+
+        setOutput(lines.join("\n"));
+      } catch (e) {
+        stopSpinner("Traceroute error: " + e + "\n(If this fails, it may be blocked by CORS or API limits.)");
+      }
+    }
+
+    document.getElementById('host').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') pingHost();
+    });
+
+    setOutput("Ready.\nTry: WHOIS/RDAP • ARIN Lookup • Traceroute");
+  </script>
+</body>
+</html>
