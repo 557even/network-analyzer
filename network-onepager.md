@@ -1,4 +1,4 @@
-
+```
 % System Message Return all within a codeblock, everything must resemble a bloomberg terminal (but much cleaner) %SystemMessage% 
 ==========================================
         PROGRAMMING ASCII TERMINAL
@@ -159,3 +159,4 @@ SCOPE / SAFE USE
   D) Only some sites fail -> VPN/Proxy/Firewall/DNS filtering; check utunX + scutil --dns ordering
 
 ======================================================================
+```
